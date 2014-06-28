@@ -1,0 +1,139 @@
+# preseed options use dhcp for installation
+# temporary hostname during installation will be "install"
+
+d-i debian-installer/locale string en_US
+d-i console-keymaps-at/keymap select us
+d-i keyboard-configuration/xkb-keymap select us
+d-i netcfg/choose_interface select auto
+d-i netcfg/get_hostname string install
+d-i netcfg/get_domain string foobar.org
+d-i mirror/country string manual
+d-i mirror/http/hostname string 10.0.2.2:3142
+d-i mirror/http/directory string /ftp.de.debian.org/debian
+d-i mirror/suite string wheezy
+d-i mirror/udeb/suite string wheezy
+d-i passwd/root-login boolean true
+d-i passwd/make-user boolean false
+d-i passwd/root-password password root
+d-i passwd/root-password-again password root
+d-i clock-setup/utc boolean true
+d-i time/zone string UTC
+d-i clock-setup/ntp boolean true
+d-i partman-auto/method string regular
+d-i partman-auto/expert_recipe string \
+           my-layout ::               \
+             1000 1000 1500 ext4      \
+               $primary{ }            \
+               $bootable{ }           \
+               method{ format }       \
+               format{ }              \
+               use_filesystem{ }      \
+               filesystem{ ext4 }     \
+               mountpoint{ / }        \
+               label{ root }          \
+             .                        \
+             150 150 150 ext4         \
+               label{ drbd-meta }     \
+             .                        \
+             300 1000 -1 ext4         \
+               method{ format }       \
+               format{ }              \
+               use_filesystem{ }      \
+               filesystem{ ext4 }     \
+               label{ drbd-data }     \
+             .
+d-i partman-basicfilesystems/no_mount_point boolean false
+d-i partman-basicfilesystems/no_swap boolean false
+d-i partman-ext3/no_mount_point boolean false
+d-i partman-ext4/no_mount_point boolean false
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+d-i base-installer/install-recommends boolean false
+tasksel tasksel/first multiselect 
+d-i pkgsel/include string ntp ntpdate nfs-kernel-server drbd8-utils heartbeat
+d-i finish-install/reboot_in_progress note
+popularity-contest popularity-contest/participate boolean true
+d-i debian-installer/exit/poweroff boolean true
+
+# differences in the late_command string are only the static ip in
+# /etc/network/interfaces and the hostname in /etc/hostname and
+# localhost in /etc/hosts
+# also, `drbdadm primary all` will only called from firstboot on server1
+
+d-i preseed/late_command string \
+echo 'T0:23:respawn:/sbin/getty -L ttyS0 9600 vt100' >> /target/etc/inittab; \
+echo 'GRUB_CMDLINE_LINUX="console=ttyS0"' >> /target/etc/default/grub; \
+echo 'GRUB_TERMINAL=serial'               >> /target/etc/default/grub; \
+in-target update-grub; \
+in-target update-rc.d -f nfs-kernel-server remove; \
+in-target update-rc.d -f nfs-common remove; \
+echo '/data/export/ 10.0.2.0/255.255.255.0(rw,no_root_squash,no_all_squash,sync,no_subtree_check)' > /target/etc/exports; \
+echo 'global {'                            > /target/etc/drbd.conf; \
+echo ' usage-count no;'                   >> /target/etc/drbd.conf; \
+echo '}'                                  >> /target/etc/drbd.conf; \
+echo 'resource res {'                     >> /target/etc/drbd.conf; \
+echo ' protocol C;'                       >> /target/etc/drbd.conf; \
+echo ' startup { degr-wfc-timeout 120; }' >> /target/etc/drbd.conf; \
+echo ' disk { on-io-error detach; }'      >> /target/etc/drbd.conf; \
+echo ' net {}'                            >> /target/etc/drbd.conf; \
+echo ' on server1 {'                      >> /target/etc/drbd.conf; \
+echo '   device     /dev/drbd0;'          >> /target/etc/drbd.conf; \
+echo '   disk       /dev/sda6;'           >> /target/etc/drbd.conf; \
+echo '   address    10.0.2.172:7788;'     >> /target/etc/drbd.conf; \
+echo '   meta-disk  /dev/sda5[0];'        >> /target/etc/drbd.conf; \
+echo '  }'                                >> /target/etc/drbd.conf; \
+echo ' on server2 {'                      >> /target/etc/drbd.conf; \
+echo '   device    /dev/drbd0;'           >> /target/etc/drbd.conf; \
+echo '   disk      /dev/sda6;'            >> /target/etc/drbd.conf; \
+echo '   address   10.0.2.173:7788;'      >> /target/etc/drbd.conf; \
+echo '   meta-disk /dev/sda5[0];'         >> /target/etc/drbd.conf; \
+echo '  }'                                >> /target/etc/drbd.conf; \
+echo '}'                                  >> /target/etc/drbd.conf; \
+echo 'logfacility     local0' > /target/etc/heartbeat/ha.cf; \
+echo 'keepalive 2'           >> /target/etc/heartbeat/ha.cf; \
+echo 'deadtime 30'           >> /target/etc/heartbeat/ha.cf; \
+echo 'bcast   eth0'          >> /target/etc/heartbeat/ha.cf; \
+echo 'node server1 server2'  >> /target/etc/heartbeat/ha.cf; \
+echo 'server1  IPaddr::10.0.2.174/24/eth0 drbddisk::res Filesystem::/dev/drbd0::/data::ext4 nfs-kernel-server' > /target/etc/heartbeat/haresources; \
+echo 'auth 3'                  > /target/etc/heartbeat/authkeys; \
+echo '3 md5 somerandomstring' >> /target/etc/heartbeat/authkeys; \
+chmod 600 /target/etc/heartbeat/authkeys; \
+echo '127.0.0.1 localhost' > /target/etc/hosts; \
+echo '127.0.1.1 server2'  >> /target/etc/hosts; \
+echo '10.0.2.172 server1' >> /target/etc/hosts; \
+echo '10.0.2.173 server2' >> /target/etc/hosts; \
+echo '10.0.2.83 client1'  >> /target/etc/hosts; \
+echo '10.0.2.84 client2'  >> /target/etc/hosts; \
+echo 'server2' > /target/etc/hostname; \
+echo 'nameserver 10.0.2.3' > /target/etc/resolv.conf; \
+echo 'auto lo'                 > /target/etc/network/interfaces; \
+echo 'iface lo inet loopback' >> /target/etc/network/interfaces; \
+echo 'auto eth0'              >> /target/etc/network/interfaces; \
+echo 'iface eth0 inet static' >> /target/etc/network/interfaces; \
+echo ' address 10.0.2.173'    >> /target/etc/network/interfaces; \
+echo ' netmask 255.255.255.0' >> /target/etc/network/interfaces; \
+echo ' gateway 10.0.2.2'      >> /target/etc/network/interfaces; \
+mkdir /target/data;           \
+mount /dev/sda6 /target/data; \
+mv /target/var/lib/nfs/ /target/data/; \
+mkdir /target/data/export;    \
+umount /target/data;          \
+ln -s /data/nfs/ /target/var/lib/nfs; \
+echo '#!/bin/sh -e'                                     > /target/etc/init.d/firstboot; \
+echo '### BEGIN INIT INFO'                             >> /target/etc/init.d/firstboot; \
+echo '# Provides: firstboot'                           >> /target/etc/init.d/firstboot; \
+echo '# Required-Start: $all'                          >> /target/etc/init.d/firstboot; \
+echo '# Required-Stop:'                                >> /target/etc/init.d/firstboot; \
+echo '# Default-Start: 2 3 4 5'                        >> /target/etc/init.d/firstboot; \
+echo '# Default-Stop: 0 1 6'                           >> /target/etc/init.d/firstboot; \
+echo '### END INIT INFO'                               >> /target/etc/init.d/firstboot; \
+echo 'echo "running firstboot script"'                 >> /target/etc/init.d/firstboot; \
+echo 'update-rc.d -f firstboot remove'                 >> /target/etc/init.d/firstboot; \
+echo 'ifconfig > foobar'                               >> /target/etc/init.d/firstboot; \
+echo 'cat /proc/drbd >> foobar'                        >> /target/etc/init.d/firstboot; \
+echo 'drbdadm create-md res'                           >> /target/etc/init.d/firstboot; \
+echo '/etc/init.d/drbd restart'                        >> /target/etc/init.d/firstboot; \
+chmod +x /target/etc/init.d/firstboot; \
+in-target update-rc.d firstboot defaults;

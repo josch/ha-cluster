@@ -1,0 +1,79 @@
+# preseed options use dhcp for installation
+# temporary hostname during installation will be "install"
+
+d-i debian-installer/locale string en_US
+d-i console-keymaps-at/keymap select us
+d-i keyboard-configuration/xkb-keymap select us
+d-i netcfg/choose_interface select auto
+d-i netcfg/get_hostname string install
+d-i netcfg/get_domain string foobar.org
+d-i mirror/country string manual
+d-i mirror/http/hostname string 10.0.2.2:3142
+d-i mirror/http/directory string /ftp.de.debian.org/debian
+d-i mirror/suite string wheezy
+d-i mirror/udeb/suite string wheezy
+d-i passwd/root-login boolean true
+d-i passwd/make-user boolean false
+d-i passwd/root-password password root
+d-i passwd/root-password-again password root
+d-i clock-setup/utc boolean true
+d-i time/zone string UTC
+d-i clock-setup/ntp boolean true
+d-i partman-auto/method string regular
+d-i partman-auto/choose_recipe select atomic
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+d-i base-installer/install-recommends boolean false
+d-i base-installer/kernel/image select none
+tasksel tasksel/first multiselect 
+d-i pkgsel/include string xen-linux-system-amd64 xen-tools xen-utils bridge-utils nfs-common
+d-i finish-install/reboot_in_progress note
+popularity-contest popularity-contest/participate boolean true
+d-i debian-installer/exit/poweroff boolean true
+
+# differences in the late_command string are only the static ip in
+# /etc/network/interfaces and the hostname in /etc/hostname and
+# localhost in /etc/hosts
+
+d-i preseed/late_command string \
+echo 'T0:23:respawn:/sbin/getty -L ttyS0 9600 vt100' >> /target/etc/inittab; \
+mv /target/etc/grub.d/10_linux /target/etc/grub.d/21_linux; \
+echo 'GRUB_CMDLINE_LINUX="console=ttyS0"' >> /target/etc/default/grub; \
+echo 'GRUB_TERMINAL=serial'               >> /target/etc/default/grub; \
+in-target update-grub; \
+echo '127.0.0.1 localhost' > /target/etc/hosts; \
+echo '127.0.1.1 client1'  >> /target/etc/hosts; \
+echo '10.0.2.174 server' >> /target/etc/hosts; \
+echo '10.0.2.83 client1' >> /target/etc/hosts; \
+echo '10.0.2.84 client2' >> /target/etc/hosts; \
+echo 'client1' > /target/etc/hostname; \
+echo 'nameserver 10.0.2.3' > /target/etc/resolv.conf; \
+echo 'auto lo'                 > /target/etc/network/interfaces; \
+echo 'iface lo inet loopback' >> /target/etc/network/interfaces; \
+echo 'auto eth0'              >> /target/etc/network/interfaces; \
+echo 'iface eth0 inet static' >> /target/etc/network/interfaces; \
+echo ' address 10.0.2.83'     >> /target/etc/network/interfaces; \
+echo ' netmask 255.255.255.0' >> /target/etc/network/interfaces; \
+echo ' gateway 10.0.2.2'      >> /target/etc/network/interfaces; \
+echo '(network-script network-bridge)'      >> /target/etc/xen/xend-config.sxp; \
+echo '(xend-relocation-server yes)'         >> /target/etc/xen/xend-config.sxp; \
+echo '(xend-relocation-port 8002)'          >> /target/etc/xen/xend-config.sxp; \
+echo '(xend-relocation-address '')'         >> /target/etc/xen/xend-config.sxp; \
+echo '(xend-relocation-hosts-allow '"''"')' >> /target/etc/xen/xend-config.sxp; \
+echo 'kernel      = "/boot/vmlinuz-3.1.0-1-amd64"'     > /target/etc/xen/vm01.cfg; \
+echo 'ramdisk     = "/boot/initrd.img-3.1.0-1-amd64"' >> /target/etc/xen/vm01.cfg; \
+echo 'vcpus       = "1"'                              >> /target/etc/xen/vm01.cfg; \
+echo 'memory      = "128"'                            >> /target/etc/xen/vm01.cfg; \
+echo 'name        = "vm01"'                           >> /target/etc/xen/vm01.cfg; \
+echo 'hostname    = "vm01"'                           >> /target/etc/xen/vm01.cfg; \
+echo 'dhcp        = "dhcp"'                           >> /target/etc/xen/vm01.cfg; \
+echo 'vif         = [ "mac=00:16:3E:C7:09:32" ]'      >> /target/etc/xen/vm01.cfg; \
+echo 'nfs_server  = "10.0.2.174"'                     >> /target/etc/xen/vm01.cfg; \
+echo 'nfs_root    = "/data/export/vm01"'              >> /target/etc/xen/vm01.cfg; \
+echo 'root        = "/dev/nfs"'                       >> /target/etc/xen/vm01.cfg; \
+echo 'extra       = "boot=nfs root=/dev/nfs"'         >> /target/etc/xen/vm01.cfg; \
+echo 'on_poweroff = "destroy"'                        >> /target/etc/xen/vm01.cfg; \
+echo 'on_reboot   = "restart"'                        >> /target/etc/xen/vm01.cfg; \
+echo 'on_crash    = "restart"'                        >> /target/etc/xen/vm01.cfg;

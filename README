@@ -1,0 +1,134 @@
+4.1. a) and 4.2 a)
+
+In this setup we will create four virtual machines. Two servers for redundant
+data storage and two clients, each running a dom0.
+
+Network configuration is done using static IPs:
+
+	server1:   10.0.2.172
+	server2:   10.0.2.173
+	virt_serv: 10.0.2.174
+	client1:   10.0.2.83
+	client2:   10.0.2.84
+
+All of the following is executed by several factors faster after installation
+of kvm for qemu:
+
+	apt-get install qemu-kvm
+
+The tutorial assumes a 64 bit host. For a 32 bit host, change
+qemu-system-x86_64 to qemu-system-i386 and change amd64 in the installer url to
+i386.
+
+The tutorial also assumes a Debian host (any release of lenny or newer should
+work) and a working apt-cacher setup. To setup apt-cacher, do:
+
+	apt-get install apt-cacher
+
+If you dont want to use apt-cacher, you have to adapt the package sources in
+the scripts.
+
+Get the debian wheezy installer:
+
+wget http://cdimage.debian.org/cdimage/daily-builds/daily/arch-latest/kfreebsd-amd64/iso-cd/debian-testing-kfreebsd-amd64-businesscard.iso
+
+Install vde for a userspace switched network between all connected qemu
+instances:
+
+	apt-get install vde2
+
+And start it (sending it to the background) together with slirp which provides
+connection to the outside using slirp networking (just as qemu user mode
+networking):
+
+	vde_switch -daemon
+	slirpvde -dhcp -daemon
+
+Starting slirp with dhcp enabled is necessary for the debian-installer to
+acquire an initial IP (giving all settings as isolinux arguments is tedious and
+errorprone) and for the domus to get an IP.
+
+Create two disk images for the two server machines and two for the client
+machines:
+
+	dd if=/dev/zero of=server1.img bs=1 count=1 seek=3000MiB
+	dd if=/dev/zero of=server2.img bs=1 count=1 seek=3000MiB
+	dd if=/dev/zero of=client1.img bs=1 count=1 seek=3000MiB
+	dd if=/dev/zero of=client2.img bs=1 count=1 seek=3000MiB
+
+Start the machines with these images, giving them all the debian installer
+cdrom and connecting them to the vde network.
+
+	qemu-system-x86_64 -m 256 -hda server1.img -net nic,macaddr=DE:AD:BE:EF:BE:9D -net vde,sock=/tmp/vde.ctl -cdrom debian-testing-amd64-businesscard.iso
+	qemu-system-x86_64 -m 256 -hda server2.img -net nic,macaddr=DE:AD:BE:EF:74:E9 -net vde,sock=/tmp/vde.ctl -cdrom debian-testing-amd64-businesscard.iso
+	qemu-system-x86_64 -m 256 -hda client1.img -net nic,macaddr=DE:AD:BE:EF:D4:4A -net vde,sock=/tmp/vde.ctl -cdrom debian-testing-amd64-businesscard.iso
+	qemu-system-x86_64 -m 256 -hda client2.img -net nic,macaddr=DE:AD:BE:EF:78:01 -net vde,sock=/tmp/vde.ctl -cdrom debian-testing-amd64-businesscard.iso
+
+The isolinux boot menu will pop up. Choose "Advanced options" and then select
+"Automated install" and press [TAB] to edit the boot commandline. Append the
+preseed url for debconf like this to the end of each of the installers
+respectively:
+
+	preseed/url=http://mister-muffin.de/debian/server1.txt
+	preseed/url=http://mister-muffin.de/debian/server2.txt
+	preseed/url=http://mister-muffin.de/debian/client1.txt
+	preseed/url=http://mister-muffin.de/debian/client2.txt
+
+Press enter and get yourself a coffee. After everything is finished the
+machines will automatically shut down.
+
+Now start all machines by using:
+
+	qemu-system-x86_64 -m 256 -hda server1.img -net nic,macaddr=DE:AD:BE:EF:BE:9D -net vde,sock=/tmp/vde.ctl -nographic
+	qemu-system-x86_64 -m 256 -hda server2.img -net nic,macaddr=DE:AD:BE:EF:74:E9 -net vde,sock=/tmp/vde.ctl -nographic
+	qemu-system-x86_64 -m 1000 -hda client1.img -net nic,macaddr=DE:AD:BE:EF:D4:4A -net vde,sock=/tmp/vde.ctl -nographic
+	qemu-system-x86_64 -m 1000 -hda client2.img -net nic,macaddr=DE:AD:BE:EF:78:01 -net vde,sock=/tmp/vde.ctl -nographic
+
+The two clients get more ram now because they have to host domus.
+
+A firstboot sysv-init script will initialize drbd on the meta partition for
+both servers and start the synchronization by setting server1 as the primary
+host.
+
+When this is done, extract a root filesystem of your choice into
+/data/export/vm01 on server1.
+
+Creating a root filesystem to share via nfs can be done by using debootstrap
+and then manually configuring it [1] or by running xen-create-image, then
+editing /etc/fstab and then putting the result on server1.
+
+xen-create-image --hostname=vm01 --dir=/root --dhcp --noswap --size=400Mb
+
+For convenience I did the above and put a tarball with debian wheezy online. On
+server1, do:
+
+	mkdir /data/export/vm01
+	wget -O - http://mister-muffin.de/debian/nfs-root-wheezy-amd64.tar | tar -x -C /data/export/vm01
+
+	Username: root
+	Password: root
+
+After the rootfilesystem is in place you can start the domu on client1:
+
+	xm create /etc/xen/vm01.cfg
+
+And migrate it to client2:
+
+	xm migrate --live vm01 client2
+
+tadaa! :)
+
+1/2:
+
+drbdadm create-md res
+#drbdadm up all
+
+1:
+#drbdadm -- --do-what-I-say primary all
+drbdadm -- --overwrite-data-of-peer primary all
+#drbdadm -- connect all
+#drbdadm primary
+
+
+
+[1] http://blog.mister-muffin.de/2011/11/21/xen-hypervisor-on-qemu-kvm-and-domu-nfs-boot-with-vde/
